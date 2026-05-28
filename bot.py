@@ -3,146 +3,176 @@ import requests
 import hashlib
 from datetime import datetime
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 SEEN_FILE = "seen_papers.txt"
 
-# ----------------------------
-# Keywords (balanced)
-# ----------------------------
 KEYWORDS = [
     "education",
-    "secondary school",
     "teaching learning",
-    "teacher education",
+    "secondary school",
+    "teacher training",
     "curriculum",
     "assessment",
-    "pedagogy",
-    "classroom management",
-    "educational technology"
+    "pedagogy"
 ]
 
 # ----------------------------
-# Seen system (anti-duplicate)
+# Safe Telegram sender (CRITICAL)
+# ----------------------------
+def send(msg):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except:
+        # اگر تلگرام هم fail شد → هیچ کاری نمی‌تونیم بکنیم
+        pass
+
+# ----------------------------
+# Seen system
 # ----------------------------
 def load_seen():
-    if not os.path.exists(SEEN_FILE):
+    try:
+        if not os.path.exists(SEEN_FILE):
+            return set()
+        with open(SEEN_FILE, "r") as f:
+            return set(line.strip() for line in f)
+    except:
         return set()
-    with open(SEEN_FILE, "r") as f:
-        return set(line.strip() for line in f)
 
 def save_seen(seen):
-    with open(SEEN_FILE, "w") as f:
-        for s in seen:
-            f.write(s + "\n")
+    try:
+        with open(SEEN_FILE, "w") as f:
+            for s in seen:
+                f.write(s + "\n")
+    except:
+        pass
 
-def make_id(title, url):
-    return hashlib.sha256((title + url).encode()).hexdigest()
-
-# ----------------------------
-# Score system (soft)
-# ----------------------------
-def score(title, abstract, year):
-    s = 0
-
-    if year and year >= datetime.now().year - 1:
-        s += 2
-    if abstract:
-        s += 1
-    if title and len(title) > 20:
-        s += 1
-
-    keywords = ["education", "learning", "teaching", "school", "curriculum"]
-    if any(k in (title or "").lower() for k in keywords):
-        s += 2
-
-    return s
+def uid(title, url):
+    return hashlib.md5((str(title) + str(url)).encode()).hexdigest()
 
 # ----------------------------
-# Smart summary (safe fallback)
-# ----------------------------
-def summarize(abstract):
-    if not abstract:
-        return "خلاصه در دسترس نیست."
-
-    sentences = [s.strip() for s in abstract.split(".") if len(s.strip()) > 30]
-    if sentences:
-        return sentences[0][:300]
-    return abstract[:200]
-
-# ----------------------------
-# Fetch papers (Semantic Scholar)
+# Fetch safe
 # ----------------------------
 def fetch():
     results = []
 
     for q in KEYWORDS:
-        url = "https://api.semanticscholar.org/graph/v1/paper/search"
-
-        params = {
-            "query": q,
-            "limit": 5,
-            "fields": "title,abstract,year,url,openAccessPdf"
-        }
-
         try:
-            r = requests.get(url, params=params, timeout=10).json()
+            r = requests.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={
+                    "query": q,
+                    "limit": 5,
+                    "fields": "title,abstract,year,url,openAccessPdf"
+                },
+                timeout=10
+            ).json()
 
             for p in r.get("data", []):
                 results.append({
                     "title": p.get("title"),
                     "abstract": p.get("abstract"),
                     "url": p.get("url"),
-                    "pdf": (p.get("openAccessPdf") or {}).get("url"),
-                    "year": p.get("year")
+                    "pdf": (p.get("openAccessPdf") or {}).get("url")
                 })
+
         except:
             continue
 
     return results
 
 # ----------------------------
-# Telegram send
+# fallback content (CRITICAL)
 # ----------------------------
-def send(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+def fallback():
+    return [
+        "Digital transformation in education",
+        "Modern teacher training methods",
+        "Curriculum innovation trends",
+        "AI in classroom learning",
+        "Student evaluation systems",
+        "Behavior management in schools"
+    ]
 
 # ----------------------------
-# MAIN
+# summary safe
+# ----------------------------
+def summary(text):
+    try:
+        if not text:
+            return "خلاصه در دسترس نیست."
+        parts = [p.strip() for p in text.split(".") if len(p.strip()) > 30]
+        return parts[0][:250] if parts else text[:200]
+    except:
+        return "خلاصه قابل نمایش نیست."
+
+# ----------------------------
+# MAIN SAFE FLOW
 # ----------------------------
 def main():
-    seen = load_seen()
-    papers = fetch()
+    try:
+        seen = load_seen()
+        papers = fetch()
 
-    new_papers = []
+        new_items = []
 
-    for p in papers:
-        uid = make_id(p["title"], p["url"])
+        # filter duplicates
+        for p in papers:
+            id_ = uid(p.get("title"), p.get("url"))
 
-        if uid in seen:
-            continue
+            if id_ in seen:
+                continue
 
-        seen.add(uid)
+            seen.add(id_)
+            new_items.append(p)
 
-        p["score"] = score(p["title"], p["abstract"], p["year"])
+        save_seen(seen)
 
-        # نرم شده: خیلی سخت‌گیر نیست
-        if p["score"] >= 2:
-            new_papers.append(p)
+        # =========================
+        # CASE 1: real papers exist
+        # =========================
+        if len(new_items) > 0:
+            msg = "📊 گزارش پژوهشی آموزش متوسطه\n"
+            msg += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n\n"
 
-    save_seen(seen)
+            for i, p in enumerate(new_items[:8], 1):
+                msg += f"📚 {i}) {p.get('title')}\n"
+                msg += f"🧠 {summary(p.get('abstract'))}\n"
+                msg += f"📄 {p.get('pdf')}\n"
+                msg += f"🔗 {p.get('url')}\n"
+                msg += "────────────────────\n\n"
 
-    # ----------------------------
-    # NO EMPTY OUTPUT MODE (IMPORTANT)
-    # ----------------------------
-    if not new_papers:
-        msg = "📊 گزارش پژوهشی آموزش متوسطه\n\n"
-        msg += "📚 امروز مقاله مستقیم کافی پیدا نشد.\n\n"
-        msg += "🔎 موضوعات پیشنهادی برای تحقیق:\n\n"
+            send(msg)
+            return
 
-        fallback_topics = [
-            "Teacher training in modern education systems",
-            "Digital learning in secondary schools",
-            "Curriculum design and
+        # =========================
+        # CASE 2: fallback mode
+        # =========================
+        msg = "📊 گزارش پژوهشی (حالت جایگزین)\n"
+        msg += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        msg += "📚 مقاله مستقیم پیدا نشد، اما موضوعات مهم پژوهشی:\n\n"
+
+        for i, t in enumerate(fallback(), 1):
+            msg += f"{i}) {t}\n"
+
+        msg += "\n🔎 سیستم در حال پایش منابع جدید است."
+        send(msg)
+        return
+
+    except Exception as e:
+        # =========================
+        # CASE 3: EMERGENCY MODE
+        # =========================
+        try:
+            send(
+                "🚨 گزارش اضطراری سیستم\n\n"
+                "ربات با خطا مواجه شد اما همچنان فعال است.\n"
+                "🔄 در اجرای بعدی دوباره تلاش می‌شود.\n"
+            )
+        except:
+            pass
+
+if __name__ == "__main__":
+    main()
