@@ -1,13 +1,14 @@
 import os
 import requests
 from datetime import datetime
+import xml.etree.ElementTree as ET
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 
 # ----------------------------
-# Telegram Sender
+# Telegram sender
 # ----------------------------
 def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -18,37 +19,57 @@ def send(text):
 
 
 # ----------------------------
-# Semantic Scholar (MAIN SOURCE)
+# FILTER (balanced + safe)
+# ----------------------------
+def is_education_paper(text):
+    text = (text or "").lower()
+
+    include = [
+        "education", "learning", "teaching", "student",
+        "school", "classroom", "curriculum", "instruction",
+        "pedagogy", "assessment"
+    ]
+
+    exclude = [
+        "surgery", "clinical", "hospital", "medicine",
+        "finance", "crypto", "stock", "bank"
+    ]
+
+    if any(x in text for x in exclude):
+        return False
+
+    return any(x in text for x in include)
+
+
+# ----------------------------
+# Semantic Scholar (MAIN)
 # ----------------------------
 def fetch_semantic_scholar():
     try:
-        url = (
-            "https://api.semanticscholar.org/graph/v1/paper/search"
-        )
+        url = "https://api.semanticscholar.org/graph/v1/paper/search"
 
         params = {
-            "query": "education OR classroom OR learning OR teaching",
+            "query": "education learning teaching classroom",
             "limit": 10,
-            "fields": "title,abstract,year,url"
+            "fields": "title,abstract,url,year"
         }
 
         r = requests.get(url, params=params, timeout=15)
-
         if r.status_code != 200:
             return []
 
         data = r.json().get("data", [])
+        results = []
 
-        papers = []
         for p in data:
             title = p.get("title", "")
             abstract = p.get("abstract", "")
+            url = p.get("url", "")
 
-            if is_valid_education_paper(title, abstract):
-                link = p.get("url", "")
-                papers.append(f"📄 {title}\n🔗 {link}")
+            if is_education_paper(title + " " + (abstract or "")):
+                results.append(f"📄 {title}\n🔗 {url}")
 
-        return papers
+        return results
 
     except Exception as e:
         print("Semantic Scholar error:", e)
@@ -56,7 +77,7 @@ def fetch_semantic_scholar():
 
 
 # ----------------------------
-# arXiv (SECOND SOURCE)
+# arXiv (backup)
 # ----------------------------
 def fetch_arxiv():
     try:
@@ -66,52 +87,26 @@ def fetch_arxiv():
         if r.status_code != 200:
             return []
 
-        import xml.etree.ElementTree as ET
-
         root = ET.fromstring(r.text)
         ns = "{http://www.w3.org/2005/Atom}"
 
-        papers = []
+        results = []
 
         for entry in root.findall(f"{ns}entry"):
             title = entry.find(f"{ns}title")
             link = entry.find(f"{ns}id")
 
             if title is not None and title.text:
-                if is_valid_education_paper(title.text, ""):
-                    papers.append(f"📄 {title.text.strip()}\n🔗 {link.text}")
+                text = title.text.strip()
 
-        return papers
+                if is_education_paper(text):
+                    results.append(f"📄 {text}\n🔗 {link.text}")
+
+        return results
 
     except Exception as e:
         print("arXiv error:", e)
         return []
-
-
-# ----------------------------
-# SMART FILTER (IMPORTANT PART)
-# ----------------------------
-def is_valid_education_paper(title, abstract):
-    text = (title + " " + abstract).lower()
-
-    # MUST HAVE (education domain)
-    positive = [
-        "education", "classroom", "learning", "teaching",
-        "student", "school", "pedagogy", "curriculum",
-        "instruction", "assessment", "education policy"
-    ]
-
-    # MUST NOT HAVE (noise domains)
-    negative = [
-        "medicine", "clinical", "hospital", "physician",
-        "finance", "bank", "crypto", "economic model",
-        "psychology experiment", "neuroscience (clinical)"
-    ]
-
-    if any(n in text for n in negative):
-        return False
-
-    return any(p in text for p in positive)
 
 
 # ----------------------------
@@ -122,33 +117,10 @@ def main():
 
     papers = []
 
-    # source 1
+    # sources
     papers += fetch_semantic_scholar()
-
-    # source 2
     papers += fetch_arxiv()
 
-    # remove duplicates
+    # deduplicate
     seen = set()
-    unique = []
-
-    for p in papers:
-        if p not in seen:
-            unique.append(p)
-            seen.add(p)
-
-    # FINAL OUTPUT LOGIC
-    if not unique:
-        send("💓 No new education papers found | system healthy | " + str(datetime.now()))
-        return
-
-    send(f"📚 Found {len(unique)} research papers:\n")
-
-    for p in unique[:8]:
-        send(p)
-
-    send("✅ Done | " + str(datetime.now()))
-
-
-if __name__ == "__main__":
-    main()
+    unique
