@@ -7,6 +7,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 
+# ----------------------------
+# Telegram sender
+# ----------------------------
 def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -16,16 +19,43 @@ def send(text):
 
 
 # ----------------------------
-# Semantic Scholar (NO FILTER)
+# Score system (IMPORTANT FIX)
 # ----------------------------
-def fetch_semantic():
+def score(title):
+    t = title.lower()
+
+    score = 0
+
+    strong = ["education", "school", "student", "classroom", "teaching", "learning", "secondary"]
+    medium = ["ai", "assessment", "curriculum", "pedagogy"]
+    weak = ["review", "study", "analysis"]
+
+    for w in strong:
+        if w in t:
+            score += 5
+
+    for w in medium:
+        if w in t:
+            score += 3
+
+    for w in weak:
+        if w in t:
+            score += 1
+
+    return score
+
+
+# ----------------------------
+# Semantic Scholar (primary source)
+# ----------------------------
+def semantic_search():
     try:
         r = requests.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={
-                "query": "education OR learning OR teaching OR science OR medicine OR finance",
+                "query": "secondary education OR classroom learning OR teaching OR student learning",
                 "limit": 10,
-                "fields": "title,url"
+                "fields": "title,url,year"
             },
             timeout=15
         )
@@ -34,11 +64,11 @@ def fetch_semantic():
         results = []
 
         for p in data:
-            title = p.get("title", "")
-            url = p.get("url", "")
+            title = p.get("title")
+            url = p.get("url")
 
             if title:
-                results.append(f"📘 {title}\n🔗 {url}")
+                results.append((score(title), title, url))
 
         return results
 
@@ -47,16 +77,16 @@ def fetch_semantic():
 
 
 # ----------------------------
-# arXiv (NO FILTER)
+# arXiv fallback (WIDER SEARCH, not empty)
 # ----------------------------
-def fetch_arxiv():
+def arxiv_search():
     try:
-        url = "http://export.arxiv.org/api/query?search_query=all&start=0&max_results=5"
-
+        url = "http://export.arxiv.org/api/query?search_query=all&start=0&max_results=10"
         r = requests.get(url, timeout=15)
-        root = ET.fromstring(r.text)
 
+        root = ET.fromstring(r.text)
         ns = "{http://www.w3.org/2005/Atom}"
+
         results = []
 
         for entry in root.findall(f"{ns}entry"):
@@ -64,7 +94,7 @@ def fetch_arxiv():
             link = entry.find(f"{ns}id")
 
             if title is not None:
-                results.append(f"📄 {title.text}\n🔗 {link.text}")
+                results.append((score(title.text), title.text, link.text))
 
         return results
 
@@ -73,26 +103,48 @@ def fetch_arxiv():
 
 
 # ----------------------------
-# MAIN (NO FILTER LOGIC)
+# MAIN AGENT LOGIC (FIXED)
 # ----------------------------
-def main():
-    send("🤖 Loose Research Bot started")
+def run():
 
-    results = []
-    results += fetch_semantic()
-    results += fetch_arxiv()
+    send("🤖 Research Agent started")
 
+    results = semantic_search()
+
+    # fallback if weak results
+    if len(results) < 3:
+        results += arxiv_search()
+
+    # ALWAYS GUARANTEE OUTPUT (CRITICAL FIX)
     if not results:
-        send("💓 Bot alive | no data returned | " + str(datetime.now()))
+        send("📡 No strong matches found — showing general education research signal")
+
+        send("📚 Suggested area: Secondary education research + classroom learning studies")
+        send("🔗 https://scholar.google.com")
+        send("🔗 https://arxiv.org")
+        send("⏱ " + str(datetime.now()))
         return
 
-    send(f"📚 Found {len(results)} mixed papers:\n")
+    # sort by score
+    results.sort(key=lambda x: x[0], reverse=True)
 
-    for r in results[:15]:
-        send(r)
+    # remove duplicates
+    seen = set()
+    final = []
 
-    send("✅ Done | " + str(datetime.now()))
+    for s, title, url in results:
+        if title not in seen:
+            final.append((title, url))
+            seen.add(title)
+
+    # OUTPUT (like your example)
+    send("📚 جدیدترین مقالات آموزش متوسطه:\n")
+
+    for i, (title, url) in enumerate(final[:5], 1):
+        send(f"{i}) {title}\n📄 {url}")
+
+    send("⏱ " + str(datetime.now()))
 
 
 if __name__ == "__main__":
-    main()
+    run()
