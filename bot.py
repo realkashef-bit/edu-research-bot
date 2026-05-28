@@ -19,15 +19,17 @@ KEYWORDS = [
 ]
 
 # ----------------------------
-# Safe Telegram sender (CRITICAL)
+# Telegram safe send (always safe)
 # ----------------------------
 def send(msg):
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg},
+            timeout=10
+        )
     except:
-        # اگر تلگرام هم fail شد → هیچ کاری نمی‌تونیم بکنیم
-        pass
+        pass  # حتی اگر تلگرام مشکل داشت، کرش نکن
 
 # ----------------------------
 # Seen system
@@ -53,11 +55,10 @@ def uid(title, url):
     return hashlib.md5((str(title) + str(url)).encode()).hexdigest()
 
 # ----------------------------
-# Fetch safe
+# Fetch papers
 # ----------------------------
 def fetch():
     results = []
-
     for q in KEYWORDS:
         try:
             r = requests.get(
@@ -84,41 +85,36 @@ def fetch():
     return results
 
 # ----------------------------
-# fallback content (CRITICAL)
+# fallback topics
 # ----------------------------
-def fallback():
+def fallback_topics():
     return [
-        "Digital transformation in education",
-        "Modern teacher training methods",
-        "Curriculum innovation trends",
-        "AI in classroom learning",
-        "Student evaluation systems",
-        "Behavior management in schools"
+        "AI in education",
+        "Curriculum innovation",
+        "Teacher training methods",
+        "Student assessment systems",
+        "Digital learning in schools"
     ]
 
 # ----------------------------
-# summary safe
+# summary
 # ----------------------------
 def summary(text):
-    try:
-        if not text:
-            return "خلاصه در دسترس نیست."
-        parts = [p.strip() for p in text.split(".") if len(p.strip()) > 30]
-        return parts[0][:250] if parts else text[:200]
-    except:
-        return "خلاصه قابل نمایش نیست."
+    if not text:
+        return "خلاصه در دسترس نیست."
+    parts = [p.strip() for p in text.split(".") if len(p.strip()) > 30]
+    return parts[0][:250] if parts else text[:200]
 
 # ----------------------------
-# MAIN SAFE FLOW
+# MAIN
 # ----------------------------
 def main():
     try:
         seen = load_seen()
         papers = fetch()
 
-        new_items = []
+        new_papers = []
 
-        # filter duplicates
         for p in papers:
             id_ = uid(p.get("title"), p.get("url"))
 
@@ -126,18 +122,20 @@ def main():
                 continue
 
             seen.add(id_)
-            new_items.append(p)
+            new_papers.append(p)
 
         save_seen(seen)
 
-        # =========================
-        # CASE 1: real papers exist
-        # =========================
-        if len(new_items) > 0:
-            msg = "📊 گزارش پژوهشی آموزش متوسطه\n"
-            msg += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-            for i, p in enumerate(new_items[:8], 1):
+        # =========================
+        # CASE 1: has papers
+        # =========================
+        if len(new_papers) > 0:
+            msg = "📊 گزارش پژوهشی آموزش متوسطه\n"
+            msg += f"📅 {now}\n\n"
+
+            for i, p in enumerate(new_papers[:8], 1):
                 msg += f"📚 {i}) {p.get('title')}\n"
                 msg += f"🧠 {summary(p.get('abstract'))}\n"
                 msg += f"📄 {p.get('pdf')}\n"
@@ -148,31 +146,29 @@ def main():
             return
 
         # =========================
-        # CASE 2: fallback mode
+        # CASE 2: HEARTBEAT (IMPORTANT FIX)
         # =========================
-        msg = "📊 گزارش پژوهشی (حالت جایگزین)\n"
-        msg += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n\n"
-        msg += "📚 مقاله مستقیم پیدا نشد، اما موضوعات مهم پژوهشی:\n\n"
+        msg = "💓 HEARTBEAT REPORT\n"
+        msg += f"📅 {now}\n\n"
+        msg += "📚 امروز مقاله جدیدی پیدا نشد.\n\n"
+        msg += "🔎 موضوعات پیشنهادی برای تحقیق:\n\n"
 
-        for i, t in enumerate(fallback(), 1):
+        for i, t in enumerate(fallback_topics(), 1):
             msg += f"{i}) {t}\n"
 
-        msg += "\n🔎 سیستم در حال پایش منابع جدید است."
+        msg += "\n✅ سیستم فعال و در حال پایش منابع است."
+
         send(msg)
-        return
 
     except Exception as e:
         # =========================
-        # CASE 3: EMERGENCY MODE
+        # EMERGENCY HEARTBEAT
         # =========================
-        try:
-            send(
-                "🚨 گزارش اضطراری سیستم\n\n"
-                "ربات با خطا مواجه شد اما همچنان فعال است.\n"
-                "🔄 در اجرای بعدی دوباره تلاش می‌شود.\n"
-            )
-        except:
-            pass
+        send(
+            "🚨 EMERGENCY HEARTBEAT\n\n"
+            "سیستم اجرا شد اما با خطای داخلی مواجه شد.\n"
+            "🔄 در اجرای بعدی دوباره تلاش خواهد شد.\n"
+        )
 
 if __name__ == "__main__":
     main()
