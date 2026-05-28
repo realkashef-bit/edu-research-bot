@@ -1,12 +1,14 @@
 import os
 import requests
-import xml.etree.ElementTree as ET
 from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 
+# ----------------------------
+# Telegram Sender
+# ----------------------------
 def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -15,30 +17,69 @@ def send(text):
         print("Telegram error:", e)
 
 
-# ---------------------------
-# SOURCE 1: arXiv (REAL)
-# ---------------------------
-def fetch_arxiv():
+# ----------------------------
+# Semantic Scholar (MAIN SOURCE)
+# ----------------------------
+def fetch_semantic_scholar():
     try:
         url = (
-            "http://export.arxiv.org/api/query?"
-            "search_query=cat:cs.AI&"
-            "start=0&max_results=5&sortBy=submittedDate&sortOrder=descending"
+            "https://api.semanticscholar.org/graph/v1/paper/search"
         )
+
+        params = {
+            "query": "education OR classroom OR learning OR teaching",
+            "limit": 10,
+            "fields": "title,abstract,year,url"
+        }
+
+        r = requests.get(url, params=params, timeout=15)
+
+        if r.status_code != 200:
+            return []
+
+        data = r.json().get("data", [])
+
+        papers = []
+        for p in data:
+            title = p.get("title", "")
+            abstract = p.get("abstract", "")
+
+            if is_valid_education_paper(title, abstract):
+                link = p.get("url", "")
+                papers.append(f"📄 {title}\n🔗 {link}")
+
+        return papers
+
+    except Exception as e:
+        print("Semantic Scholar error:", e)
+        return []
+
+
+# ----------------------------
+# arXiv (SECOND SOURCE)
+# ----------------------------
+def fetch_arxiv():
+    try:
+        url = "http://export.arxiv.org/api/query?search_query=all:education&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending"
 
         r = requests.get(url, timeout=15)
         if r.status_code != 200:
             return []
 
-        root = ET.fromstring(r.text)
+        import xml.etree.ElementTree as ET
 
+        root = ET.fromstring(r.text)
         ns = "{http://www.w3.org/2005/Atom}"
+
         papers = []
 
         for entry in root.findall(f"{ns}entry"):
             title = entry.find(f"{ns}title")
+            link = entry.find(f"{ns}id")
+
             if title is not None and title.text:
-                papers.append("📄 " + title.text.strip().replace("\n", " "))
+                if is_valid_education_paper(title.text, ""):
+                    papers.append(f"📄 {title.text.strip()}\n🔗 {link.text}")
 
         return papers
 
@@ -47,42 +88,63 @@ def fetch_arxiv():
         return []
 
 
-# ---------------------------
-# SOURCE 2: fallback API (always works)
-# ---------------------------
-def fetch_fallback():
-    try:
-        r = requests.get("https://api.sampleapis.com/futurama/episodes", timeout=10)
-        if r.status_code != 200:
-            return []
+# ----------------------------
+# SMART FILTER (IMPORTANT PART)
+# ----------------------------
+def is_valid_education_paper(title, abstract):
+    text = (title + " " + abstract).lower()
 
-        data = r.json()
+    # MUST HAVE (education domain)
+    positive = [
+        "education", "classroom", "learning", "teaching",
+        "student", "school", "pedagogy", "curriculum",
+        "instruction", "assessment", "education policy"
+    ]
 
-        return [f"📚 Backup item: {x['title']}" for x in data[:3]]
+    # MUST NOT HAVE (noise domains)
+    negative = [
+        "medicine", "clinical", "hospital", "physician",
+        "finance", "bank", "crypto", "economic model",
+        "psychology experiment", "neuroscience (clinical)"
+    ]
 
-    except:
-        return []
+    if any(n in text for n in negative):
+        return False
+
+    return any(p in text for p in positive)
 
 
+# ----------------------------
+# MAIN
+# ----------------------------
 def main():
-    print("BOT STARTED")
+    send("🤖 Research Bot started")
 
-    send("🤖 Bot started")
+    papers = []
 
-    papers = fetch_arxiv()
+    # source 1
+    papers += fetch_semantic_scholar()
 
-    # اگر arXiv خالی بود → fallback
-    if not papers:
-        papers = fetch_fallback()
+    # source 2
+    papers += fetch_arxiv()
 
-    # اگر باز هم خالی بود → غیرممکن fallback قطعی
-    if not papers:
-        send("💓 Bot alive | no data sources available | " + str(datetime.now()))
-        return
-
-    send(f"📚 Found {len(papers)} items:")
+    # remove duplicates
+    seen = set()
+    unique = []
 
     for p in papers:
+        if p not in seen:
+            unique.append(p)
+            seen.add(p)
+
+    # FINAL OUTPUT LOGIC
+    if not unique:
+        send("💓 No new education papers found | system healthy | " + str(datetime.now()))
+        return
+
+    send(f"📚 Found {len(unique)} research papers:\n")
+
+    for p in unique[:8]:
         send(p)
 
     send("✅ Done | " + str(datetime.now()))
