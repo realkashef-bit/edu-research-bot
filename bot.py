@@ -19,17 +19,25 @@ KEYWORDS = [
 ]
 
 # ----------------------------
-# Telegram safe send (always safe)
+# LOG helper (IMPORTANT)
+# ----------------------------
+def log(msg):
+    print(f"[LOG] {msg}")
+
+# ----------------------------
+# Safe Telegram send
 # ----------------------------
 def send(msg):
     try:
-        requests.post(
+        log("Sending message to Telegram...")
+        r = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
             data={"chat_id": CHAT_ID, "text": msg},
             timeout=10
         )
-    except:
-        pass  # حتی اگر تلگرام مشکل داشت، کرش نکن
+        log(f"Telegram response: {r.text}")
+    except Exception as e:
+        log(f"Telegram ERROR: {e}")
 
 # ----------------------------
 # Seen system
@@ -40,7 +48,8 @@ def load_seen():
             return set()
         with open(SEEN_FILE, "r") as f:
             return set(line.strip() for line in f)
-    except:
+    except Exception as e:
+        log(f"Seen load error: {e}")
         return set()
 
 def save_seen(seen):
@@ -48,8 +57,8 @@ def save_seen(seen):
         with open(SEEN_FILE, "w") as f:
             for s in seen:
                 f.write(s + "\n")
-    except:
-        pass
+    except Exception as e:
+        log(f"Seen save error: {e}")
 
 def uid(title, url):
     return hashlib.md5((str(title) + str(url)).encode()).hexdigest()
@@ -59,8 +68,11 @@ def uid(title, url):
 # ----------------------------
 def fetch():
     results = []
+
     for q in KEYWORDS:
         try:
+            log(f"Fetching: {q}")
+
             r = requests.get(
                 "https://api.semanticscholar.org/graph/v1/paper/search",
                 params={
@@ -79,7 +91,8 @@ def fetch():
                     "pdf": (p.get("openAccessPdf") or {}).get("url")
                 })
 
-        except:
+        except Exception as e:
+            log(f"Fetch error: {e}")
             continue
 
     return results
@@ -89,10 +102,10 @@ def fetch():
 # ----------------------------
 def fallback_topics():
     return [
-        "AI in education",
-        "Curriculum innovation",
-        "Teacher training methods",
-        "Student assessment systems",
+        "AI in education systems",
+        "Curriculum modernization trends",
+        "Teacher training improvements",
+        "Student assessment methods",
         "Digital learning in schools"
     ]
 
@@ -100,18 +113,25 @@ def fallback_topics():
 # summary
 # ----------------------------
 def summary(text):
-    if not text:
-        return "خلاصه در دسترس نیست."
-    parts = [p.strip() for p in text.split(".") if len(p.strip()) > 30]
-    return parts[0][:250] if parts else text[:200]
+    try:
+        if not text:
+            return "خلاصه در دسترس نیست."
+        parts = [p.strip() for p in text.split(".") if len(p.strip()) > 30]
+        return parts[0][:250] if parts else text[:200]
+    except:
+        return "خلاصه خطا دارد."
 
 # ----------------------------
 # MAIN
 # ----------------------------
 def main():
+    log("BOT STARTED")
+
     try:
         seen = load_seen()
         papers = fetch()
+
+        log(f"Total fetched papers: {len(papers)}")
 
         new_papers = []
 
@@ -128,10 +148,10 @@ def main():
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # =========================
-        # CASE 1: has papers
-        # =========================
-        if len(new_papers) > 0:
+        # ----------------------------
+        # CASE 1: papers exist
+        # ----------------------------
+        if new_papers:
             msg = "📊 گزارش پژوهشی آموزش متوسطه\n"
             msg += f"📅 {now}\n\n"
 
@@ -143,32 +163,36 @@ def main():
                 msg += "────────────────────\n\n"
 
             send(msg)
+            log("Report sent successfully")
             return
 
-        # =========================
-        # CASE 2: HEARTBEAT (IMPORTANT FIX)
-        # =========================
+        # ----------------------------
+        # CASE 2: HEARTBEAT (GUARANTEED)
+        # ----------------------------
         msg = "💓 HEARTBEAT REPORT\n"
         msg += f"📅 {now}\n\n"
-        msg += "📚 امروز مقاله جدیدی پیدا نشد.\n\n"
-        msg += "🔎 موضوعات پیشنهادی برای تحقیق:\n\n"
+        msg += "📚 مقاله مستقیم پیدا نشد.\n\n"
+        msg += "🔎 موضوعات پیشنهادی:\n\n"
 
         for i, t in enumerate(fallback_topics(), 1):
             msg += f"{i}) {t}\n"
 
-        msg += "\n✅ سیستم فعال و در حال پایش منابع است."
+        msg += "\n✅ سیستم فعال است و در حال پایش می‌باشد."
 
         send(msg)
+        log("Heartbeat sent successfully")
 
     except Exception as e:
-        # =========================
-        # EMERGENCY HEARTBEAT
-        # =========================
-        send(
-            "🚨 EMERGENCY HEARTBEAT\n\n"
-            "سیستم اجرا شد اما با خطای داخلی مواجه شد.\n"
-            "🔄 در اجرای بعدی دوباره تلاش خواهد شد.\n"
-        )
+        log(f"CRITICAL ERROR: {e}")
+
+        try:
+            send(
+                "🚨 CRITICAL HEARTBEAT\n\n"
+                "سیستم اجرا شد اما خطای جدی رخ داد.\n"
+                "🔄 تلاش بعدی انجام خواهد شد."
+            )
+        except:
+            log("Even emergency send failed")
 
 if __name__ == "__main__":
     main()
