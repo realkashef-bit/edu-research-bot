@@ -8,7 +8,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 
 # ----------------------------
-# Telegram sender
+# Telegram sender (safe)
 # ----------------------------
 def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -19,43 +19,25 @@ def send(text):
 
 
 # ----------------------------
-# Score system (IMPORTANT FIX)
+# Simple scorer (optional)
 # ----------------------------
-def score(title):
-    t = title.lower()
-
-    score = 0
-
-    strong = ["education", "school", "student", "classroom", "teaching", "learning", "secondary"]
-    medium = ["ai", "assessment", "curriculum", "pedagogy"]
-    weak = ["review", "study", "analysis"]
-
-    for w in strong:
-        if w in t:
-            score += 5
-
-    for w in medium:
-        if w in t:
-            score += 3
-
-    for w in weak:
-        if w in t:
-            score += 1
-
-    return score
+def score(text):
+    t = text.lower()
+    keywords = ["education", "learning", "student", "school", "teaching", "classroom"]
+    return sum(3 for k in keywords if k in t)
 
 
 # ----------------------------
-# Semantic Scholar (primary source)
+# Semantic Scholar
 # ----------------------------
-def semantic_search():
+def semantic():
     try:
         r = requests.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={
-                "query": "secondary education OR classroom learning OR teaching OR student learning",
-                "limit": 10,
-                "fields": "title,url,year"
+                "query": "education learning teaching",
+                "limit": 5,
+                "fields": "title,url"
             },
             timeout=15
         )
@@ -77,21 +59,23 @@ def semantic_search():
 
 
 # ----------------------------
-# arXiv fallback (WIDER SEARCH, not empty)
+# arXiv fallback
 # ----------------------------
-def arxiv_search():
+def arxiv():
     try:
-        url = "http://export.arxiv.org/api/query?search_query=all&start=0&max_results=10"
-        r = requests.get(url, timeout=15)
+        r = requests.get(
+            "http://export.arxiv.org/api/query?search_query=all&start=0&max_results=5",
+            timeout=15
+        )
 
         root = ET.fromstring(r.text)
         ns = "{http://www.w3.org/2005/Atom}"
 
         results = []
 
-        for entry in root.findall(f"{ns}entry"):
-            title = entry.find(f"{ns}title")
-            link = entry.find(f"{ns}id")
+        for e in root.findall(f"{ns}entry"):
+            title = e.find(f"{ns}title")
+            link = e.find(f"{ns}id")
 
             if title is not None:
                 results.append((score(title.text), title.text, link.text))
@@ -103,42 +87,49 @@ def arxiv_search():
 
 
 # ----------------------------
-# MAIN AGENT LOGIC (FIXED)
+# GUARANTEED OUTPUT BLOCK
+# ----------------------------
+def fallback_output():
+    send("📡 No new strong matches found today")
+    send("📚 But here are active research sources you can still explore:")
+    send("1) https://scholar.google.com")
+    send("2) https://arxiv.org")
+    send("3) https://www.semanticscholar.org")
+    send("🧠 Tip: Try broader query like 'education AI learning study'")
+    send("⏱ " + str(datetime.now()))
+
+
+# ----------------------------
+# MAIN
 # ----------------------------
 def run():
 
-    send("🤖 Research Agent started")
+    send("🤖 Research Bot started")
 
-    results = semantic_search()
+    results = semantic()
 
-    # fallback if weak results
-    if len(results) < 3:
-        results += arxiv_search()
+    if len(results) < 2:
+        results += arxiv()
 
-    # ALWAYS GUARANTEE OUTPUT (CRITICAL FIX)
+    # اگر هنوز هم چیزی نبود → باز هم خروجی می‌دهیم
     if not results:
-        send("📡 No strong matches found — showing general education research signal")
-
-        send("📚 Suggested area: Secondary education research + classroom learning studies")
-        send("🔗 https://scholar.google.com")
-        send("🔗 https://arxiv.org")
-        send("⏱ " + str(datetime.now()))
+        fallback_output()
         return
 
-    # sort by score
+    # sort
     results.sort(key=lambda x: x[0], reverse=True)
 
     # remove duplicates
     seen = set()
     final = []
 
-    for s, title, url in results:
+    for _, title, url in results:
         if title not in seen:
             final.append((title, url))
             seen.add(title)
 
-    # OUTPUT (like your example)
-    send("📚 جدیدترین مقالات آموزش متوسطه:\n")
+    # OUTPUT
+    send("📚 Latest Education Papers:\n")
 
     for i, (title, url) in enumerate(final[:5], 1):
         send(f"{i}) {title}\n📄 {url}")
