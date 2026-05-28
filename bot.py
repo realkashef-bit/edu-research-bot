@@ -8,86 +8,73 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 
 # ----------------------------
-# Telegram sender
+# TELEGRAM
 # ----------------------------
 def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": text}, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
+    except:
+        pass
 
 
 # ----------------------------
-# FILTER (balanced + safe)
+# AGENT: generates search queries dynamically
 # ----------------------------
-def is_education_paper(text):
-    text = (text or "").lower()
-
-    include = [
-        "education", "learning", "teaching", "student",
-        "school", "classroom", "curriculum", "instruction",
-        "pedagogy", "assessment"
+def generate_queries():
+    base_topics = [
+        "education research",
+        "learning science",
+        "classroom teaching methods",
+        "AI in education",
+        "student performance study"
     ]
 
-    exclude = [
-        "surgery", "clinical", "hospital", "medicine",
-        "finance", "crypto", "stock", "bank"
-    ]
-
-    if any(x in text for x in exclude):
-        return False
-
-    return any(x in text for x in include)
+    return base_topics
 
 
 # ----------------------------
-# Semantic Scholar (MAIN)
+# Semantic Scholar (smart search)
 # ----------------------------
-def fetch_semantic_scholar():
+def fetch_semantic(query):
     try:
-        url = "https://api.semanticscholar.org/graph/v1/paper/search"
-
-        params = {
-            "query": "education learning teaching classroom",
-            "limit": 10,
-            "fields": "title,abstract,url,year"
-        }
-
-        r = requests.get(url, params=params, timeout=15)
-        if r.status_code != 200:
-            return []
+        r = requests.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params={
+                "query": query,
+                "limit": 5,
+                "fields": "title,url,year"
+            },
+            timeout=15
+        )
 
         data = r.json().get("data", [])
         results = []
 
         for p in data:
-            title = p.get("title", "")
-            abstract = p.get("abstract", "")
-            url = p.get("url", "")
+            title = p.get("title")
+            url = p.get("url")
 
-            if is_education_paper(title + " " + (abstract or "")):
-                results.append(f"📄 {title}\n🔗 {url}")
+            if title and url:
+                score = score_paper(title)
+                results.append((score, f"📘 {title}\n🔗 {url}"))
 
         return results
 
-    except Exception as e:
-        print("Semantic Scholar error:", e)
+    except:
         return []
 
 
 # ----------------------------
-# arXiv (backup)
+# arXiv fallback
 # ----------------------------
 def fetch_arxiv():
     try:
-        url = "http://export.arxiv.org/api/query?search_query=all:education&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending"
+        url = "http://export.arxiv.org/api/query?search_query=all&start=0&max_results=5&sortBy=submittedDate"
 
         r = requests.get(url, timeout=15)
-        if r.status_code != 200:
-            return []
-
         root = ET.fromstring(r.text)
+
         ns = "{http://www.w3.org/2005/Atom}"
 
         results = []
@@ -96,31 +83,79 @@ def fetch_arxiv():
             title = entry.find(f"{ns}title")
             link = entry.find(f"{ns}id")
 
-            if title is not None and title.text:
-                text = title.text.strip()
-
-                if is_education_paper(text):
-                    results.append(f"📄 {text}\n🔗 {link.text}")
+            if title is not None:
+                score = score_paper(title.text)
+                results.append((score, f"📄 {title.text}\n🔗 {link.text}"))
 
         return results
 
-    except Exception as e:
-        print("arXiv error:", e)
+    except:
         return []
 
 
 # ----------------------------
-# MAIN
+# SIMPLE RELEVANCE SCORER (AGENT BRAIN)
 # ----------------------------
-def main():
-    send("🤖 Research Bot started")
+def score_paper(text):
+    text = text.lower()
 
-    papers = []
+    score = 0
 
-    # sources
-    papers += fetch_semantic_scholar()
-    papers += fetch_arxiv()
+    keywords = {
+        "education": 5,
+        "learning": 4,
+        "teaching": 4,
+        "student": 3,
+        "classroom": 3,
+        "ai": 2,
+        "machine learning": 2
+    }
 
-    # deduplicate
+    for k, v in keywords.items():
+        if k in text:
+            score += v
+
+    return score
+
+
+# ----------------------------
+# AGENT CORE LOOP
+# ----------------------------
+def run_agent():
+    send("🤖 Research Agent started")
+
+    queries = generate_queries()
+
+    all_results = []
+
+    for q in queries:
+        all_results += fetch_semantic(q)
+
+    all_results += fetch_arxiv()
+
+    # sort by relevance score
+    all_results.sort(key=lambda x: x[0], reverse=True)
+
+    # remove duplicates
     seen = set()
-    unique
+    final = []
+
+    for score, item in all_results:
+        if item not in seen:
+            final.append(item)
+            seen.add(item)
+
+    # OUTPUT POLICY (NO EMPTY OUTPUT EVER)
+    if final:
+        send(f"📚 Agent found {len(final)} ranked papers:\n")
+
+        for f in final[:10]:
+            send(f)
+
+        send("✅ Agent cycle complete | " + str(datetime.now()))
+    else:
+        send("💓 Agent active | no strong matches this cycle | " + str(datetime.now()))
+
+
+if __name__ == "__main__":
+    run_agent()
