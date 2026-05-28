@@ -196,3 +196,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+def main():
+    print("BOT STARTED")
+    send("💓 BOT IS RUNNING")
+
+if __name__ == "__main__":
+    main()
